@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("-f", "--file", dest="filename", default="models/icosahedron.obj",
+    parser.add_argument("-f", "--file", dest="filename", default="models/kndC.obj",
                         help="path to the model", metavar="FILE")
     parser.add_argument("-n", "--numbers",
                         action="store_true", dest="printNumbers", default=False,
@@ -23,7 +23,7 @@ def main():
 
 
     #Compute maxSize of the components
-    # Alle Komponenten müssen auf die selbe Größe skaliert werden, die vom größten Bauteil
+    # All components must be scaled to the same size as the largest component
     maxSize = 0
     for unfolding in unfoldedComponents:
         [xmin, ymin, boxSize] = findBoundingBox(unfolding[0])

@@ -1,0 +1,9 @@
+Current algorithm unfold model, but if it has overlaps algorithm will cut unfolded models into
+segments with no overlapping
+
+Need TO_DO:
+1) Try to improve algorithm or maybe make new one that unfold model as one solid piece
+2) Test it on some models
+3) Find some extreme cases to test algorithm
+4) Optimize algorithm. heavy models require alot of run time. need to reduce complexity of algorithm
+
