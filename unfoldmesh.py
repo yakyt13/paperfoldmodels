@@ -6,7 +6,7 @@ from usefullfunctions import *
 from usefullfunctions import detectOverlaps
 
 
-def find_best_spanning_tree(mesh, dual_graph, num_iterations=1):
+def find_best_spanning_tree(mesh, dual_graph, num_iterations=100):
     best_tree = None
     best_unfolding = None
     min_overlaps = float('inf')

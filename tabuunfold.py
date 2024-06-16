@@ -5,7 +5,6 @@ import openmesh as om
 from usefullfunctions import *
 
 
-
 # Tabu search steps:
 # 1) Input: mesh model. Each face must be triangular and planar
 # 2) The initial unfolder: unfolded model. If it has overlaps it is acceptable
@@ -39,6 +38,7 @@ def setInitialRoot(tree):
 
 def calculateAverageValence(spanningTree):
     return sum(spanningTree.degree(face) for face in spanningTree.nodes()) / len(spanningTree.nodes())
+
 
 def stuckInRootLock():
     # Implement a condition to check if stuck in root lock
