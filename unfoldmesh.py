@@ -3,7 +3,8 @@ import openmesh as om
 import networkx as nx
 from tabuunfold import *
 from usefullfunctions import *
-from usefullfunctions import detectOverlaps
+import multiprocessing
+from functools import partial
 
 
 def find_best_spanning_tree(mesh, dual_graph, num_iterations=100):
@@ -30,143 +31,7 @@ def find_best_spanning_tree(mesh, dual_graph, num_iterations=100):
     return best_tree, best_unfolding, min_overlaps
 
 
-# Function that unwinds a spanning tree
-def unfoldSpanningTree(mesh, spanningTree):
-    unfoldedMesh = om.TriMesh()  # The unwound network
-
-    numFaces = mesh.n_faces()
-    sizeTree = spanningTree.number_of_edges()
-    numUnfoldedEdges = 3 * numFaces - sizeTree
-
-    isFoldingEdge = np.zeros(numUnfoldedEdges, dtype=bool)  # Specifies whether an edge is folded or cut
-    glueNumber = np.empty(numUnfoldedEdges, dtype=int)  # Saves which edge is glued together
-    foldingDirection = np.empty(numUnfoldedEdges, dtype=int)  # Valley folding or mountain folding
-
-    connections = np.empty(numFaces, dtype=int)  # Stores which original triangle belongs to the unfolded one
-
-    # Choose the first triangle arbitrarily
-    startingNode = list(spanningTree.nodes())[0]
-    startingTriangle = mesh.face_handle(startingNode)
-
-    # We unwind the first triangle
-
-    # All half edges of the first triangle
-    firstHalfEdge = mesh.halfedge_handle(startingTriangle)
-    secondHalfEdge = mesh.next_halfedge_handle(firstHalfEdge)
-    thirdHalfEdge = mesh.next_halfedge_handle(secondHalfEdge)
-    originalHalfEdges = [firstHalfEdge, secondHalfEdge, thirdHalfEdge]
-
-    # Calculate the lengths of the edges, this determines the shape of the triangle (congruence)
-    edgelengths = [mesh.calc_edge_length(firstHalfEdge), mesh.calc_edge_length(secondHalfEdge),
-                   mesh.calc_edge_length(thirdHalfEdge)]
-
-    # The first two points
-    firstUnfoldedPoint = np.array([0, 0, 0])
-    secondUnfoldedPoint = np.array([edgelengths[0], 0, 0])
-
-    # We calculate the third point of the triangle from the first two. There are two possibilities
-    [thirdUnfolded0, thirdUnfolded1] = getThirdPoint(firstUnfoldedPoint, secondUnfoldedPoint, edgelengths[0],
-                                                     edgelengths[1],
-                                                     edgelengths[2])
-    if thirdUnfolded0[1] > 0:
-        thirdUnfoldedPoint = thirdUnfolded0
-    else:
-        thirdUnfoldedPoint = thirdUnfolded1
-
-    # Add the new corners to the unfolded mesh
-    # firstUnfoldedVertex = unfoldedMesh.add_vertex(secondUnfoldedPoint)
-    # secondUnfoldedVertex = unfoldedMesh.add_vertex(thirdUnfoldedPoint)
-    # thirdUnfoldedVertex = unfoldedMesh.add_vertex(firstUnfoldedPoint)
-
-    firstUnfoldedVertex = unfoldedMesh.add_vertex(firstUnfoldedPoint)
-    secondUnfoldedVertex = unfoldedMesh.add_vertex(secondUnfoldedPoint)
-    thirdUnfoldedVertex = unfoldedMesh.add_vertex(thirdUnfoldedPoint)
-
-    # Create the face
-    unfoldedFace = unfoldedMesh.add_face(firstUnfoldedVertex, secondUnfoldedVertex, thirdUnfoldedVertex)
-
-    # Save properties of the face and edges
-    # The half edges in the unrolled grid
-    firstUnfoldedHalfEdge = unfoldedMesh.next_halfedge_handle(unfoldedMesh.opposite_halfedge_handle(unfoldedMesh.halfedge_handle(firstUnfoldedVertex)))
-    secondUnfoldedHalfEdge = unfoldedMesh.next_halfedge_handle(firstUnfoldedHalfEdge)
-    thirdUnfoldedHalfEdge = unfoldedMesh.next_halfedge_handle(secondUnfoldedHalfEdge)
-
-    unfoldedHalfEdges = [firstUnfoldedHalfEdge, secondUnfoldedHalfEdge, thirdUnfoldedHalfEdge]
-
-    # Associated triangle in the 3D mesh
-    connections[unfoldedFace.idx()] = startingTriangle.idx()
-    # Folding direction and glue number
-    addVisualisationData(mesh, unfoldedMesh, originalHalfEdges, unfoldedHalfEdges, glueNumber, foldingDirection)
-
-    halfEdgeConnections = {firstHalfEdge.idx(): firstUnfoldedHalfEdge.idx(),
-                           secondHalfEdge.idx(): secondUnfoldedHalfEdge.idx(),
-                           thirdHalfEdge.idx(): thirdUnfoldedHalfEdge.idx()}
-
-    # We go through the tree
-    for dualEdge in nx.dfs_edges(spanningTree, source=startingNode):
-        foldingEdge = mesh.edge_handle(spanningTree[dualEdge[0]][dualEdge[1]]['idx'])
-        # Find the corresponding half-edge in the starting triangle
-        foldingHalfEdge = mesh.halfedge_handle(foldingEdge, 0)
-        if not (mesh.face_handle(foldingHalfEdge).idx() == dualEdge[0]):
-            foldingHalfEdge = mesh.halfedge_handle(foldingEdge, 1)
-
-        # Find the corresponding unwrapped half edge
-        unfoldedLastHalfEdge = unfoldedMesh.halfedge_handle(halfEdgeConnections[foldingHalfEdge.idx()])
-
-        # Find the point in the unwrapped triangle that is not on the fold edge
-        oppositeUnfoldedVertex = unfoldedMesh.to_vertex_handle(unfoldedMesh.next_halfedge_handle(unfoldedLastHalfEdge))
-
-        # We turn the half edges over to lie in the new triangle
-        foldingHalfEdge = mesh.opposite_halfedge_handle(foldingHalfEdge)
-        unfoldedLastHalfEdge = unfoldedMesh.opposite_halfedge_handle(unfoldedLastHalfEdge)
-
-        # The two corners of the folded edge
-        unfoldedFromVertex = unfoldedMesh.from_vertex_handle(unfoldedLastHalfEdge)
-        unfoldedToVertex = unfoldedMesh.to_vertex_handle(unfoldedLastHalfEdge)
-
-        # Calculate the edge lengths in the new triangle
-        secondHalfEdgeInFace = mesh.next_halfedge_handle(foldingHalfEdge)
-        thirdHalfEdgeInFace = mesh.next_halfedge_handle(secondHalfEdgeInFace)
-
-        originalHalfEdges = [foldingHalfEdge, secondHalfEdgeInFace, thirdHalfEdgeInFace]
-
-        edgelengths = [mesh.calc_edge_length(foldingHalfEdge), mesh.calc_edge_length(secondHalfEdgeInFace),
-                       mesh.calc_edge_length(thirdHalfEdgeInFace)]
-
-        # We calculate the two possibilities for the third point in the triangle
-        [newUnfoldedVertex0, newUnfoldedVertex1] = getThirdPoint(unfoldedMesh.point(unfoldedFromVertex),
-                                                                 unfoldedMesh.point(unfoldedToVertex), edgelengths[0],
-                                                                 edgelengths[1], edgelengths[2])
-
-
-        newUnfoldedVertex = unfoldedMesh.add_vertex(newUnfoldedVertex0)
-
-        # Make the face
-        newface = unfoldedMesh.add_face(unfoldedFromVertex, unfoldedToVertex, newUnfoldedVertex)
-
-        secondUnfoldedHalfEdge = unfoldedMesh.next_halfedge_handle(unfoldedLastHalfEdge)
-        thirdUnfoldedHalfEdge = unfoldedMesh.next_halfedge_handle(secondUnfoldedHalfEdge)
-        unfoldedHalfEdges = [unfoldedLastHalfEdge, secondUnfoldedHalfEdge, thirdUnfoldedHalfEdge]
-
-        # Store edge and side information
-        # Dashed line in the output
-        unfoldedLastEdge = unfoldedMesh.edge_handle(unfoldedLastHalfEdge)
-        isFoldingEdge[unfoldedLastEdge.idx()] = True
-
-        # Glue number and fold direction
-        addVisualisationData(mesh, unfoldedMesh, originalHalfEdges, unfoldedHalfEdges, glueNumber, foldingDirection)
-
-        # Related page
-        connections[newface.idx()] = dualEdge[1]
-
-        # Identify the half edges
-        for i in range(3):
-            halfEdgeConnections[originalHalfEdges[i].idx()] = unfoldedHalfEdges[i].idx()
-
-    return [unfoldedMesh, isFoldingEdge, connections, glueNumber, foldingDirection]
-
-
-def unfold(mesh):
+def unfold(mesh, count=1):
     # Calculate the number of faces, edges and corners, as well as the lengths of the longest shortest edge
     # To be deleted
     numEdges = mesh.n_edges()
@@ -187,6 +52,8 @@ def unfold(mesh):
             maxLength = edgelength
     # minLength is length of shortest edge of model
     # maxLength is length of longest edge of model
+
+    edges_list = list()
 
     # All edges in the network
     for edge in mesh.edges():
@@ -217,32 +84,36 @@ def unfold(mesh):
         dualGraph.add_node(face1.idx(), pos=center1)        # First face
         dualGraph.add_node(face2.idx(), pos=center2)        # Second face
         dualGraph.add_edge(face1.idx(), face2.idx(), idx=edge.idx(), weight=edgeweight)     # Edge between two faces
+        e = list()
+        e.append(face1.idx())
+        e.append(face2.idx())
+        e.append(edge.idx())
+        edges_list.append(e)
 
-    # TODO: add tabu search to resolve intersections
-    # TODO: tabu search search for best spanning tree
+    # print(f'processing tree #{count}')
+    # spanningTree, overlaps = tabuUnfolding(mesh, randomSpanningTree(dualGraph), edges_list)
+    # while overlaps:
+    #     print(f'No solution found. Remaining overlaps: {overlaps}')
+    #     print('')
+    #     count += 1
+    #     print(f'processing tree #{count}')
+    #     spanningTree, overlaps = tabuUnfolding(mesh, randomSpanningTree(dualGraph), edges_list)
 
-    # Calculate the initial spanning tree
-    spanningTree = randomSpanningTree(dualGraph)
+    spanningTree, _ = tabuUnfolding(mesh, randomSpanningTree(dualGraph), edges_list)
+
+
+    # num_parallel_runs = 4
+    # with multiprocessing.Pool(num_parallel_runs) as pool:
+    #     result = pool.map(partial(tabuUnfolding, mesh, randomSpanningTree(dualGraph)), edges_list)
+    # for overlaps, tree in result:
+    #     if overlaps == 0:
+    #         spanningTree = tree
+    #         break
+
     # spanningTree = nx.minimum_spanning_tree(dualGraph)
 
-    # Unfold the tree
     fullUnfolding = unfoldSpanningTree(mesh, spanningTree)
     [unfoldedMesh, isFoldingEdge, connections, glueNumber, foldingDirection] = fullUnfolding
-
-    # While spanning tree has overlaps we try to change tree by moving sub-trees/nodes to another parents
-    # If after all possible changes spanning tree still has overlaps we take other random spanning tree
-    overlaps, _ = detectOverlaps(unfoldedMesh, spanningTree)
-    while overlaps:
-        [spanningTree, overlaps] = tabuUnfolding(unfoldedMesh, spanningTree)
-        if overlaps == 0:
-            break
-
-        # Case when overlaps > 0
-        else:
-            spanningTree = randomSpanningTree(dualGraph)
-            fullUnfolding = unfoldSpanningTree(mesh, spanningTree)
-            [unfoldedMesh, isFoldingEdge, connections, glueNumber, foldingDirection] = fullUnfolding
-            overlaps, _ = detectOverlaps(unfoldedMesh, spanningTree)
 
     # # Resolve the intersections
     # # Find all intersections
@@ -323,8 +194,10 @@ def unfold(mesh):
     # spanningTree.remove_edges_from(S)
 
     # Find the related components
+    # connectedComponents = nx.algorithms.components.connected_components(new_tree)
     connectedComponents = nx.algorithms.components.connected_components(spanningTree)
     connectedComponentList = list(connectedComponents)
+
 
     # Processing of the components
     unfoldings = []
