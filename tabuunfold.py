@@ -1,7 +1,3 @@
-import math
-import random
-from collections import deque
-import openmesh as om
 from usefullfunctions import *
 
 
@@ -19,6 +15,8 @@ from usefullfunctions import *
 #   This part is most time-consuming, so we need to implement efficient algorithm to resolve this
 #   To do this we will implement Sweep Line Overlap Detection algorithm which improve complexity to O(nlogn)
 
+# Di-graph doesn't have parent-child dependency
+# This function add 'parent' field to each node
 def parentChildDependency(tree):
     nodes = list(tree.nodes)
     root = nodes[0]
@@ -35,11 +33,12 @@ def parentChildDependency(tree):
     tree.graph['root'] = root
     return tree
 
-
+# Used to determine tabu-list length
 def calculateAverageValence(spanningTree):
     return sum(spanningTree.degree(face) for face in spanningTree.nodes()) / len(spanningTree.nodes())
 
 
+# Check stuck situation when tree root overlapping
 def stuckInRootLock(spanningTree, edge_list, collidingFaces, root=None):
     if root is None:
         root = getRoot(spanningTree)
@@ -48,24 +47,36 @@ def stuckInRootLock(spanningTree, edge_list, collidingFaces, root=None):
     neighbors = getNeighbors(edge_list, root)
     neighbors = set(neighbors)
     sub_tree = getSubTree(spanningTree, root)
+    # sub_tree = dfs_tree(spanningTree, root)
     return neighbors.issubset(sub_tree)
 
 
-def stuckInMemoryLock(tabu_list, max_iterations):
-    return len(tabu_list) > max_iterations
+# Check if there is no available moves
+def stuckInMemoryLock(spanningTree, tabu_list, collidingFaces, edges_list):
+    for face in collidingFaces:
+        if availableNeighbors(spanningTree, face, tabu_list, edges_list):
+            return True
+    return False
 
 
+# Clear tabu-list
+def clearMemory(tabu_list):
+    tabu_list.clear()
+    return tabu_list
+
+
+# Change root of stuck subtree(whole tree in our case)
 def rerootIntoStuckSubTree(spanningTree):
     root = getRoot(spanningTree)
     sub_tree = getSubTree(spanningTree, root)
+    # sub_tree = dfs_tree(spanningTree, root)
     if None in sub_tree:
         sub_tree.remove(None)
     new_root = random.choice(list(sub_tree))
-    if new_root is None:
-        print(sub_tree)
     return changeTreeRoot(spanningTree, new_root)
 
 
+# Change tree root to given node
 def reRoot(tree, new_root):
     current = new_root
     parent = tree.nodes[current]['parent']
@@ -87,6 +98,7 @@ def reRoot(tree, new_root):
     return tree
 
 
+# Perform random reroot of tree
 def randomReroot(tree):
     nodes = list(tree.nodes)
     root = getRoot(tree)
@@ -95,6 +107,7 @@ def randomReroot(tree):
     return changeTreeRoot(tree, root)
 
 
+# Print tree in DFS order
 def printTreeDFS(tree):
     visited = set()
     root = getRoot(tree)
@@ -112,7 +125,8 @@ def printTreeDFS(tree):
     dfs(root)
 
 
-def initHistoryValues(tree, overlaps, collidingFaces):
+# Initialize history values. used in Tabu unfold algorithm
+def initHistoryValues(tree, collidingFaces):
     # Initialize history values
     bH, xH = None, None
     treeH = tree
@@ -121,12 +135,14 @@ def initHistoryValues(tree, overlaps, collidingFaces):
     return bH, xH, oH, treeH, collH
 
 
+# Pick a random colliding  face
 def selectRandomCollidingFace(collidingFaces):
     if not list(collidingFaces):
         return None
     return random.choice(list(collidingFaces))
 
 
+# Return list of neighbors of given face
 def getNeighbors(edges_list, face_idx):
     neighbors = list()
     for edge in edges_list:
@@ -138,17 +154,60 @@ def getNeighbors(edges_list, face_idx):
     return neighbors
 
 
-def bestNeighbor(spanningTree, face,  tabu_list, edges_list):
-    # Find the best neighbor filtered by the tabu list
+# Return if there is available neighbors of given face
+def availableNeighbors(spanningTree, face, tabu_list, edges_list):
     neighbors = getNeighbors(edges_list, face)
     neighbors = set(neighbors)
     sub_tree = getSubTree(spanningTree, face)
+    # sub_tree = dfs_tree(spanningTree, face)
     for neighbor in neighbors:
         if neighbor not in sub_tree and {face, neighbor} not in tabu_list:
-            return neighbor
-    return None
+            return True
+    return False
 
 
+# Pick a random neighbor of fiven face
+def pickNeighbor(spanningTree, face, tabu_list, edges_list):
+    neighbors = getNeighbors(edges_list, face)
+    sub_tree = getSubTree(spanningTree, face)
+    # sub_tree = dfs_tree(spanningTree, face)
+    result = [item for item in neighbors if item not in sub_tree]
+    if not result:
+        return None
+    return random.choice(result)
+
+
+# Return best neighbor of given face
+def bestNeighbor(mesh, spanningTree, face, tabu_list, edges_list):
+    neighbors = getNeighbors(edges_list, face)
+    neighbors = set(neighbors)
+    sub_tree = getSubTree(spanningTree, face)
+    # sub_tree = dfs_tree(spanningTree, face)
+
+    best_neighbor = None
+    best_score = float('inf')
+    best_tree = None
+    best_unfold = None
+    best_col_faces = None
+
+    for neighbor in neighbors:
+        if neighbor not in sub_tree and {face, neighbor} not in tabu_list:
+            temp_tree = move(spanningTree, face, neighbor, edges_list)
+            fullUnfolding = unfoldSpanningTree(mesh, temp_tree)
+            unfoldedMesh = fullUnfolding[0]
+            temp_overlaps, temp_col_faces = detectOverlaps(unfoldedMesh, temp_tree)
+
+            if temp_overlaps < best_score:
+                best_score = temp_overlaps
+                best_neighbor = neighbor
+                best_tree = temp_tree
+                best_unfold = fullUnfolding
+                best_col_faces = temp_col_faces
+
+    return best_tree, best_score, best_col_faces, best_neighbor, best_unfold
+
+
+# Perform a move. Attach face to given neighbor
 def move(spanningTree, face, neighbor, edges_list):
     root = getRoot(spanningTree)
     predecessors = nx.predecessor(spanningTree, root)
@@ -161,6 +220,7 @@ def move(spanningTree, face, neighbor, edges_list):
     return spanningTree
 
 
+# Memorize performed move (face, neighbor)
 def memorize(face, neighbor, tabu_list, max_iterations):
     # Memorize the move
     if face is not None and {face, neighbor} not in tabu_list:
@@ -169,11 +229,13 @@ def memorize(face, neighbor, tabu_list, max_iterations):
         tabu_list.pop(0)
 
 
+# Return parent of given face
 def findParentOfFace(spaningTree, face):
     parent = spaningTree.nodes[face]['parent']
     return parent
 
 
+# Return index of given face. each face in mesh(before unfolding) has personal index
 def findEdgeIndex(p1, p2, edges_list):
     for edge in edges_list:
         edge = list(edge)
@@ -182,6 +244,7 @@ def findEdgeIndex(p1, p2, edges_list):
     return 0
 
 
+# Main function to unfold mesh without overlaps
 def tabuUnfolding(mesh, spanningTree, edges_list, count=0, max_count=None):
     # Main loop of the Tabu Search
     spanningTree = parentChildDependency(spanningTree)
@@ -192,6 +255,7 @@ def tabuUnfolding(mesh, spanningTree, edges_list, count=0, max_count=None):
 
     if max_count is None:
         max_count = len(spanningTree.nodes) * 2
+        # max_count = len(spanningTree.nodes)
     print(f'max iterations for current tree: {max_count}')
 
     tabu_list = []
@@ -199,35 +263,33 @@ def tabuUnfolding(mesh, spanningTree, edges_list, count=0, max_count=None):
 
     while overlaps > 0 and count < max_count:
     # while overlaps > 0:
-        if overlaps > len(spanningTree.nodes):
-            print(collidingFaces)
         if stuckInRootLock(spanningTree, edges_list, collidingFaces):
             spanningTree = rerootIntoStuckSubTree(spanningTree)
         else:
             spanningTree = randomReroot(spanningTree)
 
         face = selectRandomCollidingFace(collidingFaces)
-        bH, xH, oH, treeH, collH = initHistoryValues(spanningTree, overlaps, collidingFaces)
+        face = connections[face]
+        bH, xH, oH, treeH, collH = initHistoryValues(spanningTree, collidingFaces)
         temp_overlaps = 0
 
         if face is None:
             print("No overlaps found")
             break
 
-        # if stuckInMemoryLock
-        # if not bestNeighbor(spanningTree, face, tabu_list, edges_list):
-        #     tabu_list = []
+        if stuckInMemoryLock(spanningTree, tabu_list, collidingFaces, edges_list):
+            tabu_list = clearMemory(tabu_list)
 
         while face != getRoot(spanningTree):
-            b = bestNeighbor(spanningTree, face, tabu_list, edges_list)  # Filtered by tabu list
             parent = findParentOfFace(spanningTree, face)
-            if b is None:
+            temp_tree, temp_overlaps, temp_colliding_faces, b, fullUnfolding = (
+                bestNeighbor(mesh, spanningTree, face, tabu_list, edges_list))  # Filtered by tabu list
+            if b:
+                [unfoldedMesh, _, connections, _, _] = fullUnfolding
+
+            if not b:
                 face = parent
                 continue
-            temp_tree = move(spanningTree, face, b, edges_list)
-            fullUnfolding = unfoldSpanningTree(mesh, temp_tree)
-            [unfoldedMesh, _, _, _, _] = fullUnfolding
-            temp_overlaps, temp_colliding_faces = detectOverlaps(unfoldedMesh, temp_tree)
 
             if temp_overlaps < overlaps:
                 spanningTree = temp_tree    # move(face, neighbor)
@@ -251,10 +313,9 @@ def tabuUnfolding(mesh, spanningTree, edges_list, count=0, max_count=None):
             overlaps = oH
             collidingFaces = collH
             memorize(xH, bH, tabu_list, tabu_len)
-        # if not count % 25:
-        print(f"Performed {count} moves. Current overlaps: {overlaps}")
-        # print('#', end='')
         count += 1
+        print_loading_bar(count, max_count, overlaps)
+        # print(f'\rmove # {count}, overlap: {overlaps}', end='')
     print('')
+
     return spanningTree, overlaps
-    # return overlaps

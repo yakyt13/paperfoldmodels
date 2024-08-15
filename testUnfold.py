@@ -1,7 +1,5 @@
-import openmesh as om
-from unfoldmesh import unfold, writeSVG, findBoundingBox
 from argparse import ArgumentParser
-
+from unfoldmesh import *
 
 
 def main():
@@ -30,7 +28,6 @@ def main():
         if boxSize > maxSize:
             maxSize = boxSize
 
-
     #Write SVG
     if printNumbers:
         basefilename = "unfoldingNumbers"
@@ -38,7 +35,8 @@ def main():
         basefilename = "unfolding"
 
     for i in range(len(unfoldedComponents)):
-        writeSVG(basefilename + str(i) + ".svg", unfoldedComponents[i], maxSize, printNumbers)
+            writeSVG(basefilename + str(i) + ".svg", unfoldedComponents[i], maxSize, printNumbers)
+            # writeSVG(basefilename + str(i) + ".svg", unfoldedComponents[i], maxSize, True)
 
     print("We wrote " + str(len(unfoldedComponents)) + " connected components.")
 

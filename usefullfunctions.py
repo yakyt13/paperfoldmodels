@@ -2,7 +2,8 @@ import numpy as np
 import openmesh as om
 import networkx as nx
 import random
-from unfoldmesh import *
+import math
+from collections import deque
 
 
 # Function that unwinds a spanning tree
@@ -241,6 +242,7 @@ def addVisualisationData(mesh, unfoldedMesh, originalHalfedges, unfoldedHalfedge
         glueNumber[unfoldedMesh.edge_handle(unfoldedHalfedges[i]).idx()] = mesh.edge_handle(originalHalfedges[i]).idx()
 
 
+# Find bounding box of face
 def findBoundingBox(mesh):
     firstpoint = mesh.point(mesh.vertex_handle(0))
     xmin = firstpoint[0]
@@ -262,35 +264,21 @@ def findBoundingBox(mesh):
     return [xmin, ymin, boxSize]
 
 
-# def faceBoundingBox(mesh, face):
-#     vertices = [v for v in mesh.fv(face)]
-#     firstpoint = mesh.point(vertices[0])
-#     xmin = firstpoint[0]
-#     xmax = firstpoint[0]
-#     ymin = firstpoint[1]
-#     ymax = firstpoint[1]
-#     for vertex in vertices:
-#         coordinates = mesh.point(vertex)
-#         if coordinates[0] < xmin:
-#             xmin = coordinates[0]
-#         if coordinates[0] > xmax:
-#             xmax = coordinates[0]
-#         if coordinates[1] < ymin:
-#             ymin = coordinates[1]
-#         if coordinates[1] > ymax:
-#             ymax = coordinates[1]
-#     # xmin - Lower Bounding Box coordinate. found at index 0
-#     # xmax - Upper Bounding Box coordinate found at index 2
-#     # same for ymin and ymax if necessary. indexes 1 and 3
-#     return (xmin, ymin, xmax, ymax)
-
-
 def writeSVG(filename, unfolding, size, printNumbers):
-    mesh = unfolding[0]
+    mesh = unfolding[0]     # unfolding[0] = unfoldedMesh
+
+    # print("write svg start")
+    # face_handle = mesh.face_handle(20)
+    # edges = []
+    # for he in mesh.fh(face_handle):
+    #     edge_handle = mesh.edge_handle(he)
+    #     edges.append(edge_handle)
+    # for e in edges:
+    #     print(e.idx())
+
     isFoldingEdge = unfolding[1]
     glueNumber = unfolding[3]
     foldingDirection = unfolding[4]
-
     # Calculate the bounding box
     [xmin, ymin, boxSize] = findBoundingBox(unfolding[0])
 
@@ -322,6 +310,8 @@ def writeSVG(filename, unfolding, size, printNumbers):
     # Go over all edges of the grid
     for edge in mesh.edges():
         # The two end points
+        # if edge.idx() == 40:
+        #     continue
         he = mesh.halfedge_handle(edge, 0)
         vertex0 = mesh.point(mesh.from_vertex_handle(he))
         vertex1 = mesh.point(mesh.to_vertex_handle(he))
@@ -374,6 +364,9 @@ def writeSVG(filename, unfolding, size, printNumbers):
     file.close()
 
 
+# Function to generate all possible panning trees of graph
+# Proccess_function is function that we run on each face
+# In this project process_function = tabuunfold
 def all_spanning_trees(mesh, graph, process_function, edges_list, t=1):
     def dfs(subgraph, edges, visited, t):
         if len(subgraph.nodes) == len(graph.nodes):
@@ -405,6 +398,7 @@ def all_spanning_trees(mesh, graph, process_function, edges_list, t=1):
     return dfs(initial_subgraph, initial_edge_list, initial_visited, t)
 
 
+# Function to generate random panning tree of graph
 def randomSpanningTree(dual_graph):
     edges = list(dual_graph.edges(data=True))
     random.shuffle(edges)
@@ -422,107 +416,36 @@ def randomSpanningTree(dual_graph):
     return mst
 
 
-# def detectOverlaps(unfoldedMesh, spanningTree):
-#     overlaps = 0
-#     epsilon = 1E-12  # accuracy
-#     faceBoxes = []
-#     collidingFaces = set()
-#     for face in unfoldedMesh.faces():
-#         bbox = faceBoundingBox(unfoldedMesh, face)
-#         faceBoxes.append((face, bbox))
-#     faceBoxes.sort(key=lambda fb: fb[1][0])
-#     n = len(faceBoxes)
-#     for i in range(n):
-#         fi, boxi = faceBoxes[i]
-#         for j in range(i+1, n):
-#             fj, boxj = faceBoxes[j]
-#             if boxj[0] > boxi[2]:
-#                 break
-#             # Check if fi and fj are connected in the spanning tree
-#             if nx.has_path(spanningTree, fi.idx(), fj.idx()):
-#                 triangle1 = []
-#                 triangle2 = []
-#                 for halfedge in unfoldedMesh.fh(fi):
-#                     triangle1.append(unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge)))
-#                 for halfedge in unfoldedMesh.fh(fj):
-#                     triangle2.append(unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge)))
-#                 if triangleIntersection(triangle1, triangle2, epsilon):
-#                     overlaps += 1
-#                     if fi.idx() not in collidingFaces:
-#                         collidingFaces.add(fi.idx())
-#                     if fj.idx() not in collidingFaces:
-#                         collidingFaces.add(fj.idx())
-#
-#     # for face1 in unfoldedMesh.faces():
-#     #     for face2 in unfoldedMesh.faces():
-#     #         if face2.idx() < face1.idx():
-#     #             triangle1 = []
-#     #             triangle2 = []
-#     #             for halfedge in unfoldedMesh.fh(face1):
-#     #                 triangle1.append(unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge)))
-#     #             for halfedge in unfoldedMesh.fh(face2):
-#     #                 triangle2.append(unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge)))
-#     #             if triangleIntersection(triangle1, triangle2, epsilon):
-#     #                 overlaps += 1
-#     #                 collidingFaces.add(face1.idx())
-#     #                 collidingFaces.add(face2.idx())
-#     return overlaps, collidingFaces
+# Function to change root of a tree
+# def changeRoot(tree, newRoot):
+#     def dfs(cur_node, parent):
+#         children = []
+#         for n in tree.neighbors(cur_node):
+#             if n != parent:
+#                 children.append(n)
+#                 dfs(n, cur_node)
+#         for c in children:
+#             tree.add_edge(cur_node, c)
+#     new_tree = nx.Graph()
+#     new_tree.add_nodes_from(tree.nodes())
+#     dfs(newRoot, None)
+#     return tree
 
 
-# def detectOverlaps(unfoldedMesh, spanningTree):
-#     overlaps = 0
-#     epsilon = 1E-12  # accuracy
-#     collidingFaces = set()
-#
-#     faces = list(unfoldedMesh.faces())
-#
-#     for face1 in faces:
-#         for face2 in faces:
-#             if face1.idx() == face2.idx():
-#                 continue
-#
-#             triangle1 = [unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge))
-#                          for halfedge in unfoldedMesh.fh(face1)]
-#             triangle2 = [unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge))
-#                          for halfedge in unfoldedMesh.fh(face2)]
-#
-#             if triangleIntersection(triangle1, triangle2, epsilon):
-#                 overlaps += 1
-#                 if face1 not in collidingFaces:
-#                     collidingFaces.add(face1.idx())
-#                 if face2 not in collidingFaces:
-#                     collidingFaces.add(face2.idx())
-#         faces.remove(face1)
-#
-#     return len(collidingFaces), collidingFaces
-
-
-def changeRoot(tree, newRoot):
-    def dfs(cur_node, parent):
-        children = []
-        for n in tree.neighbors(cur_node):
-            if n != parent:
-                children.append(n)
-                dfs(n, cur_node)
-        for c in children:
-            tree.add_edge(cur_node, c)
-    new_tree = nx.Graph()
-    new_tree.add_nodes_from(tree.nodes())
-    dfs(newRoot, None)
-    return tree
-
-
+# Returns root of current tree
 def getRoot(tree):
     # Get the root of the tree
     return tree.graph['root']
 
 
+# Set root of current tree to specific node
 def setRoot(tree, new_root):
     tree.graph['root'] = new_root
     tree.nodes[new_root]['parent'] = None
     return tree
 
 
+# Function to change root of a tree
 def changeTreeRoot(tree, new_root):
     if not tree.has_node(new_root):
         print(new_root)
@@ -557,6 +480,7 @@ def changeTreeRoot(tree, new_root):
     return new_tree
 
 
+# Return a subtree of given node
 def getSubTree(tree, root):
     # Use DFS to traverse the subtree from the root node
     def dfs(current_node, parent, subtree_nodes):
@@ -577,9 +501,9 @@ def getSubTree(tree, root):
 
 
 def calculateBoundingBox(triangle):
-    min_point = np.min(triangle, axis=0)
-    max_point = np.max(triangle, axis=0)
-    return min_point, max_point
+    min_corner = np.min(triangle, axis=0)
+    max_corner = np.max(triangle, axis=0)
+    return min_corner, max_corner
 
 
 def hashFunction(point, cell_size):
@@ -587,10 +511,8 @@ def hashFunction(point, cell_size):
 
 
 def insertIntoGrid(grid, face, bounding_box, cell_size):
-    min_point, max_point = bounding_box
-    min_hash = hashFunction(min_point, cell_size)
-    max_hash = hashFunction(max_point, cell_size)
-
+    min_hash = hashFunction(bounding_box[0], cell_size)
+    max_hash = hashFunction(bounding_box[1], cell_size)
     for x in range(min_hash[0], max_hash[0] + 1):
         for y in range(min_hash[1], max_hash[1] + 1):
             for z in range(min_hash[2], max_hash[2] + 1):
@@ -601,7 +523,6 @@ def insertIntoGrid(grid, face, bounding_box, cell_size):
 
 
 def detectOverlaps(unfoldedMesh, spanningTree, cell_size=1.0):
-    overlaps = 0
     epsilon = 1E-12  # accuracy
     collidingFaces = set()
 
@@ -613,15 +534,14 @@ def detectOverlaps(unfoldedMesh, spanningTree, cell_size=1.0):
 
     # Calculate bounding boxes and insert faces into the grid
     for face in faces:
-        triangle = [unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge)) for halfedge in unfoldedMesh.fh(face)]
+        triangle = [np.array(unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge))) for halfedge in unfoldedMesh.fh(face)]
         bounding_box = calculateBoundingBox(triangle)
         bounding_boxes[face.idx()] = bounding_box
         insertIntoGrid(grid, face, bounding_box, cell_size)
 
     # Detect overlaps
     for face1 in faces:
-        triangle1 = [unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge)) for halfedge in
-                     unfoldedMesh.fh(face1)]
+        triangle1 = [np.array(unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge))) for halfedge in unfoldedMesh.fh(face1)]
         bounding_box1 = bounding_boxes[face1.idx()]
         min_hash1 = hashFunction(bounding_box1[0], cell_size)
         max_hash1 = hashFunction(bounding_box1[1], cell_size)
@@ -636,12 +556,28 @@ def detectOverlaps(unfoldedMesh, spanningTree, cell_size=1.0):
                             if face2.idx() <= face1.idx() or face2.idx() in checked_faces:
                                 continue
                             checked_faces.add(face2.idx())
-                            triangle2 = [unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge)) for halfedge in
-                                         unfoldedMesh.fh(face2)]
+                            triangle2 = [np.array(unfoldedMesh.point(unfoldedMesh.from_vertex_handle(halfedge)))
+                                         for halfedge in unfoldedMesh.fh(face2)]
                             if triangleIntersection(triangle1, triangle2, epsilon):
-                                overlaps += 1
                                 collidingFaces.add(face1.idx())
                                 collidingFaces.add(face2.idx())
 
-    return overlaps, collidingFaces
-    # return len(collidingFaces), collidingFaces
+    return len(collidingFaces), collidingFaces
+
+
+def print_loading_bar(current_count, max_count, overlaps):
+    # Calculate the percentage
+    percentage = (current_count / max_count) * 100
+    # Calculate the number of '#' to print
+    num_hashes = int(percentage * 0.5)
+    # Calculate the number of '_' to print
+    num_underscores = 50 - num_hashes
+
+    if overlaps == 0:
+        num_hashes = 50
+        num_underscores = 0
+        percentage = 100
+
+    # Print the loading bar
+    print(f"\rProcessing [{'#' * num_hashes}{'_' * num_underscores} {int(percentage)}%] Overlaps: {overlaps}", end='')
+
